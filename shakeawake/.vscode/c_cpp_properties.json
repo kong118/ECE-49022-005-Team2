@@ -1,0 +1,29 @@
+{
+    "configurations": [
+        {
+            "name": "STM32L432KC",
+            "includePath": [
+                "${workspaceFolder}/Inc",
+                "${workspaceFolder}/Src",
+                "${workspaceFolder}",
+                "/usr/include",
+                "/usr/local/include"
+            ],
+            "defines": [
+                "STM32L432KCUx",
+                "RTE_DEVICE_STARTUP_STM32L4XX"
+            ],
+            "compilerPath": "${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gcc.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "gcc-arm",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/Inc",
+                    "${workspaceFolder}/Src"
+                ]
+            }
+        }
+    ],
+    "version": 4
+}
