@@ -10,6 +10,9 @@
 /* SPI1 Handle (to be used in main.c and spi_gpio_config.c) */
 extern SPI_HandleTypeDef hspi1;
 
+/* UART1 Handle for terminal output */
+extern UART_HandleTypeDef huart1;
+
 /* ========================================================================
  * GPIO Initialization Functions
  * ======================================================================== */
@@ -31,6 +34,26 @@ void MX_GPIO_Init(void);
  *   - Prescaler set for appropriate clock speed
  */
 void MX_SPI1_Init(void);
+
+/**
+ * @brief Initialize USART1 for terminal output
+ *   - 115200 baud, 8 data bits, 1 stop bit
+ *   - PA9 (TX), PA10 (RX)
+ */
+void MX_USART1_Init(void);
+
+/**
+ * @brief Send a string via UART1
+ * @param str  NULL-terminated string to send
+ */
+void UART_SendString(const char *str);
+
+/**
+ * @brief Send formatted string via UART1 (like printf)
+ * @param format  Format string
+ * @param ...     Variable arguments
+ */
+void UART_Printf(const char *format, ...);
 
 /* ========================================================================
  * Helper Functions for ADXL362 CS Control
