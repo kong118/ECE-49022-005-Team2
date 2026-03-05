@@ -16,7 +16,8 @@
 #define ADXL362_REG_DEVID           0x00  /* Device AD ID (should be 0xAD) */
 #define ADXL362_REG_DEVID_MST       0x01  /* MEMS Device ID (should be 0x1D) */
 #define ADXL362_REG_PARTID          0x02  /* Part ID (should be 0xF2) */
-#define ADXL362_REG_THRESH_ACT      0x20  /* Activity threshold (2 bytes) */
+#define ADXL362_REG_THRESH_ACT      0x20  /* Activity threshold LOW (2 bytes: 0x20, 0x21) */
+#define ADXL362_REG_TIME_ACT        0x22  /* Activity time */
 #define ADXL362_REG_THRESH_INACT    0x23  /* Inactivity threshold (2 bytes) */
 #define ADXL362_REG_TIME_INACT      0x25  /* Inactivity time (2 bytes) */
 #define ADXL362_REG_ACT_INACT_CTL   0x27  /* Activity/Inactivity control */
@@ -39,11 +40,13 @@
  * ======================================================================== */
 #define ADXL362_POWER_STANDBY       0x00
 #define ADXL362_POWER_MEASUREMENT   0x02
+#define ADXL362_POWER_WAKEUP        0x0A  /* Wake-up mode + measurement (bits 3,1) */
 
 /* ========================================================================
  * ADXL362 Activity/Inactivity Control bits
  * ======================================================================== */
 #define ADXL362_ACT_ENABLE          0x01  /* Enable activity detection */
+#define ADXL362_ACT_REF             0x02  /* Referenced activity mode */
 #define ADXL362_ACT_AC_MODE         0x00  /* AC-coupled (0) or DC-coupled (1) */
 #define ADXL362_INACT_ENABLE        0x04  /* Enable inactivity detection */
 
@@ -51,6 +54,7 @@
  * ADXL362 Interrupt Map Register bits
  * ======================================================================== */
 #define ADXL362_INT_ACT             0x10  /* Map activity to INT pin */
+#define ADXL362_INT_AWAKE           0x40  /* Map AWAKE status to INT pin */
 
 /* ========================================================================
  * Function Prototypes

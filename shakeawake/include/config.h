@@ -25,7 +25,7 @@ extern volatile uint8_t wake_event_flag;
 /* ========================================================================
  * Default Configuration Values
  * ======================================================================== */
-#define DEFAULT_ACTIVITY_THRESHOLD_MG      500    /* 500 mg wake threshold */
+#define DEFAULT_ACTIVITY_THRESHOLD_MG      150    /* 150 mg wake threshold (lower = more sensitive) */
 #define DEFAULT_OUTPUT_PULSE_DURATION_MS   500    /* 500 ms OUTPUT/EN pulse */
 
 /* ========================================================================
@@ -52,7 +52,7 @@ extern volatile uint8_t wake_event_flag;
 #define OUTPUT_PIN              GPIO_PIN_7   /* PA7 - A6, Active HIGH */
 
 #define ENABLE_PORT             GPIOA
-#define ENABLE_PIN              GPIO_PIN_6   /* PA3 - A2, Active HIGH */
+#define ENABLE_PIN              GPIO_PIN_6   /* PA6 - A5, Active HIGH */
 
 /* ========================================================================
  * Configuration Functions

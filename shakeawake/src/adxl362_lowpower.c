@@ -15,6 +15,9 @@
 #include "adxl362_lowpower.h"
 #include "spi_gpio_config.h"
 
+/* External UART functions for debug output */
+extern void UART_SendString(const char *str);
+
 /* ========================================================================
  * Internal SPI Helper Functions
  * ======================================================================== */
@@ -132,29 +135,19 @@ HAL_StatusTypeDef ADXL362_ReadBuffer(uint8_t regAddr, uint8_t *pData, uint8_t le
 /**
  * @brief Convert milliG threshold to ADXL362 register value
  * 
- * ADXL362 ACT_THRESH register resolution (per datasheet):
- *   - 1 LSB = ~62.5 mg (for ±2g range)
- *   - Register is 11-bit (0-2047)
+ * ADXL362 ACT_THRESH register resolution (per datasheet Table 1):
+ *   In +/-2g range: 1 mg/LSB
+ *   Register is 11-bit (0-2047)
  * 
- * Conversion formula:
- *   register_value = (threshold_mg * 16) / 1000
- *   This is equivalent to: threshold_mg / 62.5
+ * So threshold_mg maps DIRECTLY to register value (1:1).
  * 
  * @param threshold_mg  Threshold in milliG
  * @return Register value (0-2047)
  */
 static uint16_t Convert_mg_to_register(uint16_t threshold_mg)
 {
-    /* 
-     * Using integer math to avoid floating point:
-     * register_value = (threshold_mg * 16) / 1000
-     * 
-     * Example: 500 mg
-     *   (500 * 16) / 1000 = 8000 / 1000 = 8
-     * Example: 1000 mg
-     *   (1000 * 16) / 1000 = 16000 / 1000 = 16
-     */
-    uint16_t reg_val = (threshold_mg * 16) / 1000;
+    /* 1 mg/LSB in +/-2g range, so register value = threshold_mg directly */
+    uint16_t reg_val = threshold_mg;
     
     /* Clamp to 11-bit range (0-2047) */
     if (reg_val > 2047) {
@@ -167,57 +160,82 @@ static uint16_t Convert_mg_to_register(uint16_t threshold_mg)
 HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
 {
     uint8_t device_id = 0;
+    uint8_t readback = 0;
     HAL_StatusTypeDef status;
+    uint16_t reg_value;
+    uint8_t thresh_low, thresh_high;
     
     /* ===== Step 1: Soft Reset ===== */
-    /* Write 0x52 to SOFT_RESET register to reset ADXL362 */
     status = ADXL362_WriteByte(ADXL362_REG_SOFT_RESET, 0x52);
     if (status != HAL_OK) {
+        UART_SendString("  SPI write failed!\r\n");
         return HAL_ERROR;
     }
     
-    /* Wait for reset to complete */
+    /* Wait for reset to complete (datasheet says 0.5ms, use 10ms for safety) */
     HAL_Delay(10);
     
     /* ===== Step 2: Verify Part ID ===== */
-    /* PARTID register (0x02) should return 0xF2 for ADXL362 */
     status = ADXL362_ReadByte(ADXL362_REG_PARTID, &device_id);
     if (status != HAL_OK || device_id != 0xF2) {
-        return HAL_ERROR;  /* Part ID mismatch - not an ADXL362 */
-    }
-    
-    /* ===== Step 3: Configure Activity Detection ===== */
-    
-    /* Set activity threshold */
-    status = ADXL362_SetWakeThreshold_mg(threshold_mg);
-    if (status != HAL_OK) {
+        UART_SendString("  Part ID mismatch!\r\n");
         return HAL_ERROR;
     }
+    UART_SendString("  Part ID verified (0xF2)\r\n");
     
-    /* ===== Step 4: Configure Activity/Inactivity Control ===== */
-    /* Enable activity detection on X, Y, Z axes (DC-coupled, referenced) */
-    /* ADXL362_REG_ACT_INACT_CTL = 0x01 enables activity detection */
-    status = ADXL362_WriteByte(ADXL362_REG_ACT_INACT_CTL, ADXL362_ACT_ENABLE);
-    if (status != HAL_OK) {
+    /* ===== All configuration done in STANDBY mode ===== */
+    /* Device is in standby after reset, so no need to explicitly set it */
+    
+    /* ===== Step 3: Set Activity Threshold ===== */
+    /* In +/-2g range: 1 mg/LSB, direct mapping */
+    reg_value = Convert_mg_to_register(threshold_mg);
+    thresh_low = (uint8_t)(reg_value & 0xFF);
+    thresh_high = (uint8_t)((reg_value >> 8) & 0x07);
+    
+    status = ADXL362_WriteByte(ADXL362_REG_THRESH_ACT, thresh_low);
+    if (status != HAL_OK) return HAL_ERROR;
+    
+    status = ADXL362_WriteByte(ADXL362_REG_THRESH_ACT + 1, thresh_high);
+    if (status != HAL_OK) return HAL_ERROR;
+    
+    /* Verify threshold was written correctly */
+    ADXL362_ReadByte(ADXL362_REG_THRESH_ACT, &readback);
+    if (readback != thresh_low) {
+        UART_SendString("  Threshold write verify failed!\r\n");
         return HAL_ERROR;
     }
+    UART_SendString("  Threshold set OK\r\n");
     
-    /* ===== Step 5: Configure Interrupt Mapping ===== */
-    /* Map ACTIVITY interrupt to INT2 pin */
+    /* ===== Step 4: Set Activity Time (1 sample) ===== */
+    status = ADXL362_WriteByte(ADXL362_REG_TIME_ACT, 1);
+    if (status != HAL_OK) return HAL_ERROR;
+    
+    /* ===== Step 5: Configure Activity/Inactivity Control ===== */
+    /* ACT_EN (bit 0) + ACT_REF (bit 1) = 0x03: referenced activity detection */
+    status = ADXL362_WriteByte(ADXL362_REG_ACT_INACT_CTL, 
+                               ADXL362_ACT_ENABLE | ADXL362_ACT_REF);
+    if (status != HAL_OK) return HAL_ERROR;
+    UART_SendString("  Activity detect configured\r\n");
+    
+    /* ===== Step 6: Map ACTIVITY interrupt to BOTH INT1 and INT2 pins ===== */
+    /* Map to both in case user wired INT1 instead of INT2 */
+    status = ADXL362_WriteByte(ADXL362_REG_INTMAP1, ADXL362_INT_ACT);
+    if (status != HAL_OK) return HAL_ERROR;
     status = ADXL362_WriteByte(ADXL362_REG_INTMAP2, ADXL362_INT_ACT);
-    if (status != HAL_OK) {
-        return HAL_ERROR;
-    }
+    if (status != HAL_OK) return HAL_ERROR;
+    UART_SendString("  INT1+INT2 mapped to ACTIVITY\r\n");
     
-    /* ===== Step 6: Enter Measurement Mode ===== */
-    /* Write 0x02 to POWER_CTL to enter measurement mode */
-    status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_MEASUREMENT);
-    if (status != HAL_OK) {
-        return HAL_ERROR;
-    }
+    /* ===== Step 7: Enter Wake-Up Mode ===== */
+    /* POWER_CTL: bit 3 = WAKEUP, bit 1 = MEASURE = 0x0A */
+    status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_WAKEUP);
+    if (status != HAL_OK) return HAL_ERROR;
     
-    /* Wait for measurement mode to stabilize */
-    HAL_Delay(10);
+    /* Wait for measurement to start */
+    HAL_Delay(20);
+    
+    /* Read and display STATUS to clear any pending interrupts */
+    ADXL362_ReadByte(ADXL362_REG_STATUS, &readback);
+    UART_SendString("  Wake-up mode active\r\n");
     
     return HAL_OK;
 }
@@ -228,42 +246,27 @@ HAL_StatusTypeDef ADXL362_SetWakeThreshold_mg(uint16_t threshold_mg)
     uint8_t thresh_low, thresh_high;
     HAL_StatusTypeDef status;
     
-    /* Convert mg threshold to register value */
+    /* Convert mg threshold to register value (1:1 in +/-2g range) */
     reg_value = Convert_mg_to_register(threshold_mg);
     
-    /* ACT_THRESH is a 16-bit register split into two 8-bit registers:
-     *   ACT_THRESH_L (address 0x20): bits 7-0
-     *   ACT_THRESH_H (address 0x21): bits 10-8 (only 3 bits used)
-     */
     thresh_low = (uint8_t)(reg_value & 0xFF);
     thresh_high = (uint8_t)((reg_value >> 8) & 0x07);
     
-    /* Optional: Put device in standby before updating threshold */
+    /* Put device in standby before updating threshold */
     status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_STANDBY);
-    if (status != HAL_OK) {
-        return HAL_ERROR;
-    }
-    
+    if (status != HAL_OK) return HAL_ERROR;
     HAL_Delay(5);
     
-    /* Write activity threshold low byte */
+    /* Write activity threshold */
     status = ADXL362_WriteByte(ADXL362_REG_THRESH_ACT, thresh_low);
-    if (status != HAL_OK) {
-        return HAL_ERROR;
-    }
+    if (status != HAL_OK) return HAL_ERROR;
     
-    /* Write activity threshold high byte */
     status = ADXL362_WriteByte(ADXL362_REG_THRESH_ACT + 1, thresh_high);
-    if (status != HAL_OK) {
-        return HAL_ERROR;
-    }
+    if (status != HAL_OK) return HAL_ERROR;
     
-    /* Return to measurement mode */
-    status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_MEASUREMENT);
-    if (status != HAL_OK) {
-        return HAL_ERROR;
-    }
-    
+    /* Return to wake-up mode */
+    status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_WAKEUP);
+    if (status != HAL_OK) return HAL_ERROR;
     HAL_Delay(5);
     
     return HAL_OK;
