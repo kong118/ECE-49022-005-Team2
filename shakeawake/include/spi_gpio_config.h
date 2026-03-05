@@ -1,42 +1,97 @@
 #ifndef SPI_GPIO_CONFIG_H
 #define SPI_GPIO_CONFIG_H
 
-#include "stm32l432xx.h"
+#include "stm32l4xx_hal.h"
 
-/* ============== Pin Definitions ============== */
+/* ========================================================================
+ * SPI and GPIO Configuration
+ * ======================================================================== */
 
-/* SPI Pins (SPI1) */
-#define SPI_PORT                GPIOB
-#define SPI_CLK_PIN             3       /* PB3 - SCLK (D13) */
-#define SPI_MOSI_PIN            5       /* PB5 - MOSI (D11) */
-#define SPI_MISO_PIN            4       /* PB4 - MISO (D12) */
-#define SPI_CS_PIN              0       /* PB0 - CS Active Low (D3) */
+/* SPI1 Handle (to be used in main.c and spi_gpio_config.c) */
+extern SPI_HandleTypeDef hspi1;
 
-/* Output Pin */
-#define OUTPUT_PORT             GPIOA
-#define OUTPUT_PIN              7       /* PA7 - A6, Active High */
+/* ========================================================================
+ * GPIO Initialization Functions
+ * ======================================================================== */
 
-/* Interrupt Pin */
-#define INT2_PORT               GPIOB
-#define INT2_PIN                6       /* PB6 - D5 */
-#define INT2_EXTI_LINE          6
-#define INT2_IRQ                EXTI15_10_IRQn
+/**
+ * @brief Initialize all GPIO pins
+ *   - SPI pins (SCLK, MOSI, MISO) in AF mode
+ *   - ADXL362 CS (PB0) as GPIO output (initially HIGH)
+ *   - ADXL362 INT2 (PB6) as EXTI input (rising edge)
+ *   - OUTPUT (PA7) as GPIO output (initially LOW)
+ *   - EN (PA3) as GPIO output (initially LOW)
+ */
+void MX_GPIO_Init(void);
 
-/* SPI Instance */
-#define SPI_INSTANCE            SPI1
+/**
+ * @brief Initialize SPI1 peripheral
+ *   - Master mode, 8-bit, CPOL=0, CPHA=0
+ *   - Software NSS (CS handled manually)
+ *   - Prescaler set for appropriate clock speed
+ */
+void MX_SPI1_Init(void);
 
-/* ============== Function Prototypes ============== */
+/* ========================================================================
+ * Helper Functions for ADXL362 CS Control
+ * ======================================================================== */
 
-void SPI_Init(void);
-void SPI_CS_Low(void);
-void SPI_CS_High(void);
-void SPI_Write_Read(uint8_t *tx_buf, uint8_t *rx_buf, uint8_t size);
+/**
+ * @brief Drive CS LOW for SPI transaction
+ */
+static inline void ADXL362_CS_Low(void)
+{
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+}
 
-void GPIO_Init(void);
-void Output_Pin_Init(void);
-void Output_Set_High(void);
-void Output_Set_Low(void);
+/**
+ * @brief Drive CS HIGH after SPI transaction
+ */
+static inline void ADXL362_CS_High(void)
+{
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+}
 
-void INT2_Interrupt_Init(void);
+/* ========================================================================
+ * Helper Functions for OUTPUT Pin Control
+ * ======================================================================== */
 
-#endif // SPI_GPIO_CONFIG_H
+/**
+ * @brief Set OUTPUT (PA7) HIGH
+ * WARNING: OUTPUT is asserted HIGH only for confirmed activity wake events
+ */
+static inline void Output_Set_High(void)
+{
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
+}
+
+/**
+ * @brief Set OUTPUT (PA7) LOW
+ */
+static inline void Output_Set_Low(void)
+{
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+}
+
+/* ========================================================================
+ * Helper Functions for EN Pin Control
+ * ======================================================================== */
+
+/**
+ * @brief Set EN (PA3) HIGH
+ * WARNING: EN is asserted HIGH only for confirmed activity wake events
+ */
+static inline void Enable_Set_High(void)
+{
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+}
+
+/**
+ * @brief Set EN (PA3) LOW
+ */
+static inline void Enable_Set_Low(void)
+{
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+}
+
+#endif /* SPI_GPIO_CONFIG_H */

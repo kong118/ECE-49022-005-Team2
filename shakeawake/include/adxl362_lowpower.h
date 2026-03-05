@@ -1,102 +1,130 @@
 #ifndef ADXL362_LOWPOWER_H
 #define ADXL362_LOWPOWER_H
 
-#include <stdint.h>
-#include "stm32l432xx.h"
+#include "stm32l4xx_hal.h"
 
-/*============== ADXL362 Registers ==============*/
-#define ADXL362_DEVID_AD        0x00
-#define ADXL362_DEVID_MST       0x01
-#define ADXL362_PARTID          0x02
-#define ADXL362_REVID           0x03
-#define ADXL362_STATUS          0x0B
-#define ADXL362_FIFO_STATUS     0x0C
-#define ADXL362_XDATA_L         0x08
-#define ADXL362_XDATA_H         0x09
-#define ADXL362_YDATA_L         0x0A
-#define ADXL362_YDATA_H         0x0B
-#define ADXL362_ZDATA_L         0x0C
-#define ADXL362_ZDATA_H         0x0D
-#define ADXL362_TEMP_L          0x12
-#define ADXL362_TEMP_H          0x13
-#define ADXL362_POWER_CTL       0x2D
-#define ADXL362_THRESH_ACT_L    0x20
-#define ADXL362_THRESH_ACT_H    0x21
-#define ADXL362_THRESH_INACT_L  0x23
-#define ADXL362_THRESH_INACT_H  0x24
-#define ADXL362_TIME_INACT_L    0x25
-#define ADXL362_TIME_INACT_H    0x26
-#define ADXL362_ACT_INACT_CTL   0x27
-#define ADXL362_FIFO_CTL        0x28
-#define ADXL362_INT1_MAP        0x2A
-#define ADXL362_INT2_MAP        0x2B
-#define ADXL362_FILTER_CTL      0x2C
-#define ADXL362_RANGE_SEL       0x2C
+/* ========================================================================
+ * ADXL362 SPI Commands (per ADXL362 datasheet)
+ * ======================================================================== */
+#define ADXL362_READ_CMD    0x0B  /* Read command byte */
+#define ADXL362_WRITE_CMD   0x0A  /* Write command byte */
+#define ADXL362_FIFO_READ   0x0D  /* FIFO read command byte */
 
-/* Power Control Register Bits */
-#define ADXL362_MEASURE         (1 << 1)      /* Measurement Mode */
-#define ADXL362_AUTOSLEEP       (1 << 2)      /* Autosleep Enable */
-#define ADXL362_WAKEUP          (1 << 3)      /* Wake-up Mode */
+/* ========================================================================
+ * ADXL362 Register Addresses (per datasheet)
+ * ======================================================================== */
+#define ADXL362_REG_DEVID           0x00  /* Device ID (should be 0xF2) */
+#define ADXL362_REG_THRESH_ACT      0x20  /* Activity threshold (2 bytes) */
+#define ADXL362_REG_THRESH_INACT    0x23  /* Inactivity threshold (2 bytes) */
+#define ADXL362_REG_TIME_INACT      0x25  /* Inactivity time (2 bytes) */
+#define ADXL362_REG_ACT_INACT_CTL   0x27  /* Activity/Inactivity control */
+#define ADXL362_REG_INTMAP1         0x2A  /* Interrupt Map 1 */
+#define ADXL362_REG_INTMAP2         0x2B  /* Interrupt Map 2 */
+#define ADXL362_REG_FILTER_CTL      0x2C  /* Filter control */
+#define ADXL362_REG_POWER_CTL       0x2D  /* Power control */
+#define ADXL362_REG_STATUS          0x0B  /* Status register */
+#define ADXL362_REG_SOFT_RESET      0x1F  /* Soft Reset */
 
-/* Filter Control Register */
-#define ADXL362_RANGE_2G        0x00
-#define ADXL362_RANGE_4G        0x01
-#define ADXL362_RANGE_8G        0x02
-#define ADXL362_ODR_100HZ       0x03          /* 100 Hz Output Data Rate */
-#define ADXL362_ODR_200HZ       0x04
-#define ADXL362_ODR_400HZ       0x05
+/* ========================================================================
+ * ADXL362 Status Register bits
+ * ======================================================================== */
+#define ADXL362_STATUS_ACT          0x10  /* Activity event detected */
+#define ADXL362_STATUS_INACT        0x08  /* Inactivity event detected */
+#define ADXL362_STATUS_FIFO_RDY     0x01  /* FIFO ready */
 
-/* Status Bits */
-#define ADXL362_STATUS_ACT      (1 << 4)
-#define ADXL362_STATUS_ERR      (1 << 0)
+/* ========================================================================
+ * ADXL362 Power Control modes
+ * ======================================================================== */
+#define ADXL362_POWER_STANDBY       0x00
+#define ADXL362_POWER_MEASUREMENT   0x02
 
-/* Activity/Inactivity Control */
-#define ADXL362_ACT_ENABLE      0x07          /* Enable activity on X,Y,Z */
-#define ADXL362_INACT_ENABLE    0x70          /* Enable inactivity on X,Y,Z */
+/* ========================================================================
+ * ADXL362 Activity/Inactivity Control bits
+ * ======================================================================== */
+#define ADXL362_ACT_ENABLE          0x01  /* Enable activity detection */
+#define ADXL362_ACT_AC_MODE         0x00  /* AC-coupled (0) or DC-coupled (1) */
+#define ADXL362_INACT_ENABLE        0x04  /* Enable inactivity detection */
 
-/* SPI Commands */
-#define ADXL362_CMD_WRITE       0x0A
-#define ADXL362_CMD_READ        0x0B
-#define ADXL362_CMD_FIFO_READ   0x0D
+/* ========================================================================
+ * ADXL362 Interrupt Map Register bits
+ * ======================================================================== */
+#define ADXL362_INT_ACT             0x10  /* Map activity to INT pin */
 
-/*============== Data Structures ==============*/
-typedef struct {
-    int16_t x;
-    int16_t y;
-    int16_t z;
-} accel_data_t;
+/* ========================================================================
+ * Function Prototypes
+ * ======================================================================== */
 
-typedef struct {
-    uint16_t activity_threshold_mg;    /* Activity threshold in mg */
-    uint16_t inactivity_threshold_mg;  /* Inactivity threshold in mg */
-    uint8_t inactivity_time_sec;       /* Inactivity time in seconds */
-    uint16_t output_pulse_duration_ms; /* Output pulse duration */
-} adxl362_config_t;
+/**
+ * @brief Initialize ADXL362 over SPI
+ *   - Perform soft reset
+ *   - Configure activity detection with wake threshold
+ *   - Map ACTIVITY to INT2
+ *   - Set INT2 as active-high push-pull
+ *   - Enter measurement mode
+ * @param threshold_mg  Activity threshold in milliG (e.g., 500 for 500 mg)
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg);
 
-/*============== Function Prototypes ==============*/
+/**
+ * @brief Set activity wake threshold at runtime
+ *   - Converts mg to ADXL362 register units (LSB_ACT_THRESH ≈ 62.5 mg)
+ *   - Places ADXL362 in standby, updates threshold, returns to measurement mode
+ * @param threshold_mg  Activity threshold in milliG (e.g., 500 for 500 mg)
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_SetWakeThreshold_mg(uint16_t threshold_mg);
 
-/* Initialization */
-void ADXL362_Init(void);
-void ADXL362_Init_Wakeup_Mode(void);
+/**
+ * @brief Read status register to confirm activity event
+ * @param pStatus  Pointer to store status byte
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_ReadStatus(uint8_t *pStatus);
 
-/* Register Operations */
-void ADXL362_Read_Register(uint8_t addr, uint8_t *data);
-void ADXL362_Write_Register(uint8_t addr, uint8_t data);
-void ADXL362_Read_Multiple(uint8_t addr, uint8_t *data, uint8_t count);
+/**
+ * @brief Acknowledge/clear INT2 interrupt on ADXL362
+ *   - Per ADXL362 datasheet, reading STATUS clears the interrupt
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_ClearInterrupt(void);
 
-/* Data Reading */
-void ADXL362_Get_Acceleration(accel_data_t *accel);
-uint8_t ADXL362_Get_Status(void);
-uint32_t ADXL362_Get_Magnitude(accel_data_t *accel);
+/* ========================================================================
+ * SPI Helper Functions (internal)
+ * ======================================================================== */
 
-/* Configuration */
-void ADXL362_Set_Activity_Threshold(uint16_t threshold_mg);
-void ADXL362_Set_Inactivity_Threshold(uint16_t threshold_mg);
-void ADXL362_Set_Data_Rate(uint8_t odr);
-void ADXL362_Configure_Wakeup_Mode(uint16_t activity_threshold_mg);
+/**
+ * @brief Write a single byte to ADXL362 register
+ * @param regAddr   Register address
+ * @param regValue  Byte value to write
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_WriteByte(uint8_t regAddr, uint8_t regValue);
 
-/* Power Mode */
-void ADXL362_Enter_Wakeup_Mode(void);
-void ADXL362_Exit_Wakeup_Mode(void);
+/**
+ * @brief Read a single byte from ADXL362 register
+ * @param regAddr   Register address
+ * @param pRegValue Pointer to store read value
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_ReadByte(uint8_t regAddr, uint8_t *pRegValue);
 
-#endif // ADXL362_LOWPOWER_H
+/**
+ * @brief Write multiple bytes to ADXL362 (follows SPI command format)
+ * @param regAddr   Starting register address
+ * @param pData     Pointer to data buffer
+ * @param len       Number of bytes to write
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_WriteBuffer(uint8_t regAddr, uint8_t *pData, uint8_t len);
+
+/**
+ * @brief Read multiple bytes from ADXL362 (follows SPI command format)
+ * @param regAddr   Starting register address
+ * @param pData     Pointer to data buffer
+ * @param len       Number of bytes to read
+ * @return HAL_OK if successful, HAL_ERROR otherwise
+ */
+HAL_StatusTypeDef ADXL362_ReadBuffer(uint8_t regAddr, uint8_t *pData, uint8_t len);
+
+#endif /* ADXL362_LOWPOWER_H */

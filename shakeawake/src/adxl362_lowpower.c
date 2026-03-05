@@ -1,198 +1,289 @@
+/* ========================================================================
+ * ADXL362 Low-Power Accelerometer Driver
+ * 
+ * This module provides SPI communication with ADXL362 accelerometer
+ * configured for activity (shake) wake detection.
+ * 
+ * Key Features:
+ *   - Soft reset on initialization
+ *   - Activity detection with configurable threshold
+ *   - INT2 interrupt mapped to activity event
+ *   - Measurement mode for continuous monitoring
+ *   - Runtime threshold adjustment API
+ * ======================================================================== */
+
 #include "adxl362_lowpower.h"
 #include "spi_gpio_config.h"
-#include "config.h"
-#include "stm32l4xx_hal.h"
 
-/*===================== ADXL362 Initialization =====================*/
-void ADXL362_Init(void)
-{
-    uint8_t chip_id;
-    
-    /* Read and verify device ID */
-    ADXL362_Read_Register(ADXL362_DEVID_AD, &chip_id);
-    if (chip_id != 0xAD) {
-        /* Device ID mismatch - initialization failed */
-        while(1);
-    }
-}
+/* ========================================================================
+ * Internal SPI Helper Functions
+ * ======================================================================== */
 
-/*===================== Setup Wake-up Mode =====================*/
-void ADXL362_Init_Wakeup_Mode(void)
+/**
+ * @brief Perform SPI transaction with manual CS control
+ * Per ADXL362 datasheet, SPI format is:
+ *   [Command Byte] [Address Byte] [Data Bytes...]
+ *   CS must be held LOW throughout entire transaction
+ */
+static HAL_StatusTypeDef SPI_Transaction(uint8_t *tx_data, uint8_t *rx_data, uint16_t length)
 {
-    /* 1. Configure Filter Control Register - Set 100Hz data rate and 2g range */
-    ADXL362_Write_Register(ADXL362_FILTER_CTL, 0x00 | ADXL362_ODR_100HZ);
+    ADXL362_CS_Low();
     
-    /* 2. Set Activity Threshold */
-    ADXL362_Set_Activity_Threshold(sys_config.activity_threshold_mg);
+    /* Send data and receive response */
+    HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(&hspi1, tx_data, rx_data, length, HAL_MAX_DELAY);
     
-    /* 3. Set Inactivity Threshold */
-    ADXL362_Set_Inactivity_Threshold(500);  /* 500 mg */
+    ADXL362_CS_High();
     
-    /* 4. Set Inactivity Time */
-    ADXL362_Write_Register(ADXL362_TIME_INACT_L, 0x01);
-    ADXL362_Write_Register(ADXL362_TIME_INACT_H, 0x00);  /* 1 second */
-    
-    /* 5. Configure Activity/Inactivity Control */
-    ADXL362_Write_Register(ADXL362_ACT_INACT_CTL, 0x77);  /* Enable activity and inactivity on X,Y,Z */
-    
-    /* 6. Configure Interrupt Mapping - Activity to INT2 */
-    ADXL362_Write_Register(ADXL362_INT2_MAP, 0x10);  /* Activity interrupt mapped to INT2 */
-    
-    /* 7. Enter Wake-up Mode (Low Power) */
-    ADXL362_Write_Register(ADXL362_POWER_CTL, ADXL362_WAKEUP);  /* Enable Wake-up mode */
-    
-    /* Delay for stabilization */
-    HAL_Delay(100);
-}
-
-/*===================== Register Read/Write =====================*/
-void ADXL362_Read_Register(uint8_t addr, uint8_t *data)
-{
-    uint8_t tx_buf[3];
-    uint8_t rx_buf[3];
-    
-    tx_buf[0] = ADXL362_CMD_READ;
-    tx_buf[1] = addr;
-    tx_buf[2] = 0x00;
-    
-    SPI_Write_Read(tx_buf, rx_buf, 3);
-    *data = rx_buf[2];
-}
-
-void ADXL362_Write_Register(uint8_t addr, uint8_t data)
-{
-    uint8_t tx_buf[3];
-    uint8_t rx_buf[3];
-    
-    tx_buf[0] = ADXL362_CMD_WRITE;
-    tx_buf[1] = addr;
-    tx_buf[2] = data;
-    
-    SPI_Write_Read(tx_buf, rx_buf, 3);
-}
-
-void ADXL362_Read_Multiple(uint8_t addr, uint8_t *data, uint8_t count)
-{
-    uint8_t i;
-    uint8_t tx_buf[258];
-    uint8_t rx_buf[258];
-    
-    tx_buf[0] = ADXL362_CMD_READ;
-    tx_buf[1] = addr;
-    
-    for (i = 0; i < count; i++) {
-        tx_buf[2 + i] = 0x00;
-    }
-    
-    SPI_Write_Read(tx_buf, rx_buf, count + 2);
-    
-    for (i = 0; i < count; i++) {
-        data[i] = rx_buf[2 + i];
-    }
-}
-
-/*===================== Data Reading =====================*/
-void ADXL362_Get_Acceleration(accel_data_t *accel)
-{
-    uint8_t data[6];
-    
-    /* Read 6 bytes starting from XDATA_L */
-    ADXL362_Read_Multiple(ADXL362_XDATA_L, data, 6);
-    
-    /* Combine bytes to form 16-bit signed values */
-    accel->x = (int16_t)((data[1] << 8) | data[0]);
-    accel->y = (int16_t)((data[3] << 8) | data[2]);
-    accel->z = (int16_t)((data[5] << 8) | data[4]);
-    
-    /* Shift to 12-bit format (ADXL362 uses 12-bit data) */
-    accel->x = accel->x >> 4;
-    accel->y = accel->y >> 4;
-    accel->z = accel->z >> 4;
-}
-
-/*===================== Status Reading =====================*/
-uint8_t ADXL362_Get_Status(void)
-{
-    uint8_t status;
-    ADXL362_Read_Register(ADXL362_STATUS, &status);
     return status;
 }
 
-/*===================== Magnitude Calculation =====================*/
-uint32_t ADXL362_Get_Magnitude(accel_data_t *accel)
+/* ========================================================================
+ * Register Access Functions
+ * ======================================================================== */
+
+HAL_StatusTypeDef ADXL362_WriteByte(uint8_t regAddr, uint8_t regValue)
 {
-    int32_t x = (int32_t)accel->x;
-    int32_t y = (int32_t)accel->y;
-    int32_t z = (int32_t)accel->z;
+    uint8_t tx_buf[3];
+    uint8_t rx_buf[3];
     
-    /* Calculate magnitude: sqrt(x^2 + y^2 + z^2) */
-    uint32_t mag_squared = (x * x) + (y * y) + (z * z);
+    /* ADXL362 SPI write format: [0x0A=WRITE_CMD] [RegisterAddress] [Data] */
+    tx_buf[0] = ADXL362_WRITE_CMD;
+    tx_buf[1] = regAddr;
+    tx_buf[2] = regValue;
     
-    /* Integer square root approximation */
-    uint32_t result = 0;
-    uint32_t bit = 1 << 15;
+    return SPI_Transaction(tx_buf, rx_buf, 3);
+}
+
+HAL_StatusTypeDef ADXL362_ReadByte(uint8_t regAddr, uint8_t *pRegValue)
+{
+    uint8_t tx_buf[3];
+    uint8_t rx_buf[3];
     
-    while (bit > mag_squared) {
-        bit >>= 1;
+    /* ADXL362 SPI read format: [0x0B=READ_CMD] [RegisterAddress] [0x00] */
+    /* Received data is in rx_buf[2] */
+    tx_buf[0] = ADXL362_READ_CMD;
+    tx_buf[1] = regAddr;
+    tx_buf[2] = 0x00;
+    
+    HAL_StatusTypeDef status = SPI_Transaction(tx_buf, rx_buf, 3);
+    
+    if (status == HAL_OK) {
+        *pRegValue = rx_buf[2];
     }
     
-    while (bit != 0) {
-        if (mag_squared >= result + bit) {
-            mag_squared -= result + bit;
-            result += (bit << 1);
+    return status;
+}
+
+HAL_StatusTypeDef ADXL362_WriteBuffer(uint8_t regAddr, uint8_t *pData, uint8_t len)
+{
+    uint8_t tx_buf[258];
+    uint8_t rx_buf[258];
+    uint8_t i;
+    
+    if (len > 256) {
+        return HAL_ERROR;
+    }
+    
+    /* ADXL362 SPI write format: [0x0A=WRITE_CMD] [RegisterAddress] [Data1] [Data2] ... */
+    tx_buf[0] = ADXL362_WRITE_CMD;
+    tx_buf[1] = regAddr;
+    
+    for (i = 0; i < len; i++) {
+        tx_buf[2 + i] = pData[i];
+    }
+    
+    return SPI_Transaction(tx_buf, rx_buf, (2 + len));
+}
+
+HAL_StatusTypeDef ADXL362_ReadBuffer(uint8_t regAddr, uint8_t *pData, uint8_t len)
+{
+    uint8_t tx_buf[258];
+    uint8_t rx_buf[258];
+    uint8_t i;
+    
+    if (len > 256) {
+        return HAL_ERROR;
+    }
+    
+    /* ADXL362 SPI read format: [0x0B=READ_CMD] [RegisterAddress] [0x00] [0x00] ... */
+    /* Received data starts at rx_buf[2] */
+    tx_buf[0] = ADXL362_READ_CMD;
+    tx_buf[1] = regAddr;
+    
+    for (i = 0; i < len; i++) {
+        tx_buf[2 + i] = 0x00;
+    }
+    
+    HAL_StatusTypeDef status = SPI_Transaction(tx_buf, rx_buf, (2 + len));
+    
+    if (status == HAL_OK) {
+        for (i = 0; i < len; i++) {
+            pData[i] = rx_buf[2 + i];
         }
-        bit >>= 1;
     }
     
-    return (result >> 1);
+    return status;
 }
 
-/*===================== Threshold Configuration =====================*/
-void ADXL362_Set_Activity_Threshold(uint16_t threshold_mg)
+/* ========================================================================
+ * ADXL362 Initialization and Configuration
+ * ======================================================================== */
+
+/**
+ * @brief Convert milliG threshold to ADXL362 register value
+ * 
+ * ADXL362 ACT_THRESH register resolution (per datasheet):
+ *   - 1 LSB = ~62.5 mg (for ±2g range)
+ *   - Register is 11-bit (0-2047)
+ * 
+ * Conversion formula:
+ *   register_value = (threshold_mg * 16) / 1000
+ *   This is equivalent to: threshold_mg / 62.5
+ * 
+ * @param threshold_mg  Threshold in milliG
+ * @return Register value (0-2047)
+ */
+static uint16_t Convert_mg_to_register(uint16_t threshold_mg)
 {
-    uint8_t thresh_l = (uint8_t)(threshold_mg & 0xFF);
-    uint8_t thresh_h = (uint8_t)((threshold_mg >> 8) & 0x0F);
+    /* 
+     * Using integer math to avoid floating point:
+     * register_value = (threshold_mg * 16) / 1000
+     * 
+     * Example: 500 mg
+     *   (500 * 16) / 1000 = 8000 / 1000 = 8
+     * Example: 1000 mg
+     *   (1000 * 16) / 1000 = 16000 / 1000 = 16
+     */
+    uint16_t reg_val = (threshold_mg * 16) / 1000;
     
-    ADXL362_Write_Register(ADXL362_THRESH_ACT_L, thresh_l);
-    ADXL362_Write_Register(ADXL362_THRESH_ACT_H, thresh_h);
-}
-
-void ADXL362_Set_Inactivity_Threshold(uint16_t threshold_mg)
-{
-    uint8_t thresh_l = (uint8_t)(threshold_mg & 0xFF);
-    uint8_t thresh_h = (uint8_t)((threshold_mg >> 8) & 0x0F);
+    /* Clamp to 11-bit range (0-2047) */
+    if (reg_val > 2047) {
+        reg_val = 2047;
+    }
     
-    ADXL362_Write_Register(ADXL362_THRESH_INACT_L, thresh_l);
-    ADXL362_Write_Register(ADXL362_THRESH_INACT_H, thresh_h);
+    return reg_val;
 }
 
-void ADXL362_Set_Data_Rate(uint8_t odr)
+HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
 {
-    uint8_t filter_val;
-    ADXL362_Read_Register(ADXL362_FILTER_CTL, &filter_val);
+    uint8_t device_id = 0;
+    HAL_StatusTypeDef status;
     
-    /* Clear ODR bits (bits 3-5) and set new ODR */
-    filter_val &= 0xC7;  /* Clear bits 3-5 */
-    filter_val |= (odr << 3);
+    /* ===== Step 1: Soft Reset ===== */
+    /* Write 0x52 to SOFT_RESET register to reset ADXL362 */
+    status = ADXL362_WriteByte(ADXL362_REG_SOFT_RESET, 0x52);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
     
-    ADXL362_Write_Register(ADXL362_FILTER_CTL, filter_val);
+    /* Wait for reset to complete */
+    HAL_Delay(10);
+    
+    /* ===== Step 2: Verify Device ID ===== */
+    status = ADXL362_ReadByte(ADXL362_REG_DEVID, &device_id);
+    if (status != HAL_OK || device_id != 0xF2) {
+        return HAL_ERROR;  /* Device ID mismatch */
+    }
+    
+    /* ===== Step 3: Configure Activity Detection ===== */
+    
+    /* Set activity threshold */
+    status = ADXL362_SetWakeThreshold_mg(threshold_mg);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    /* ===== Step 4: Configure Activity/Inactivity Control ===== */
+    /* Enable activity detection on X, Y, Z axes (DC-coupled, referenced) */
+    /* ADXL362_REG_ACT_INACT_CTL = 0x01 enables activity detection */
+    status = ADXL362_WriteByte(ADXL362_REG_ACT_INACT_CTL, ADXL362_ACT_ENABLE);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    /* ===== Step 5: Configure Interrupt Mapping ===== */
+    /* Map ACTIVITY interrupt to INT2 pin */
+    status = ADXL362_WriteByte(ADXL362_REG_INTMAP2, ADXL362_INT_ACT);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    /* ===== Step 6: Enter Measurement Mode ===== */
+    /* Write 0x02 to POWER_CTL to enter measurement mode */
+    status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_MEASUREMENT);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    /* Wait for measurement mode to stabilize */
+    HAL_Delay(10);
+    
+    return HAL_OK;
 }
 
-void ADXL362_Configure_Wakeup_Mode(uint16_t activity_threshold_mg)
+HAL_StatusTypeDef ADXL362_SetWakeThreshold_mg(uint16_t threshold_mg)
 {
-    ADXL362_Init_Wakeup_Mode();
-    ADXL362_Set_Activity_Threshold(activity_threshold_mg);
+    uint16_t reg_value;
+    uint8_t thresh_low, thresh_high;
+    HAL_StatusTypeDef status;
+    
+    /* Convert mg threshold to register value */
+    reg_value = Convert_mg_to_register(threshold_mg);
+    
+    /* ACT_THRESH is a 16-bit register split into two 8-bit registers:
+     *   ACT_THRESH_L (address 0x20): bits 7-0
+     *   ACT_THRESH_H (address 0x21): bits 10-8 (only 3 bits used)
+     */
+    thresh_low = (uint8_t)(reg_value & 0xFF);
+    thresh_high = (uint8_t)((reg_value >> 8) & 0x07);
+    
+    /* Optional: Put device in standby before updating threshold */
+    status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_STANDBY);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    HAL_Delay(5);
+    
+    /* Write activity threshold low byte */
+    status = ADXL362_WriteByte(ADXL362_REG_THRESH_ACT, thresh_low);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    /* Write activity threshold high byte */
+    status = ADXL362_WriteByte(ADXL362_REG_THRESH_ACT + 1, thresh_high);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    /* Return to measurement mode */
+    status = ADXL362_WriteByte(ADXL362_REG_POWER_CTL, ADXL362_POWER_MEASUREMENT);
+    if (status != HAL_OK) {
+        return HAL_ERROR;
+    }
+    
+    HAL_Delay(5);
+    
+    return HAL_OK;
 }
 
-/*===================== Power Mode Control =====================*/
-void ADXL362_Enter_Wakeup_Mode(void)
+HAL_StatusTypeDef ADXL362_ReadStatus(uint8_t *pStatus)
 {
-    /* Set Wake-up mode in Power Control Register */
-    ADXL362_Write_Register(ADXL362_POWER_CTL, ADXL362_WAKEUP);
+    /* Read STATUS register to check for activity event
+     * Per ADXL362 datasheet, reading STATUS register also clears the interrupt
+     */
+    return ADXL362_ReadByte(ADXL362_REG_STATUS, pStatus);
 }
 
-void ADXL362_Exit_Wakeup_Mode(void)
+HAL_StatusTypeDef ADXL362_ClearInterrupt(void)
 {
-    /* Enable full measurement mode */
-    ADXL362_Write_Register(ADXL362_POWER_CTL, ADXL362_MEASURE);
+    uint8_t status;
+    
+    /* 
+     * Per ADXL362 datasheet section on interrupt clearing:
+     * Reading the STATUS register clears ACTIVITY and other interrupt flags.
+     * This is already done implicitly when we read STATUS to check the ACT bit.
+     */
+    return ADXL362_ReadByte(ADXL362_REG_STATUS, &status);
 }
