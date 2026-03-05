@@ -10,8 +10,8 @@
 /* SPI1 Handle (to be used in main.c and spi_gpio_config.c) */
 extern SPI_HandleTypeDef hspi1;
 
-/* UART1 Handle for terminal output */
-extern UART_HandleTypeDef huart1;
+/* UART2 Handle for terminal output (VCP via ST-Link) */
+extern UART_HandleTypeDef huart2;
 
 /* ========================================================================
  * GPIO Initialization Functions
@@ -36,11 +36,11 @@ void MX_GPIO_Init(void);
 void MX_SPI1_Init(void);
 
 /**
- * @brief Initialize USART1 for terminal output
+ * @brief Initialize USART2 for terminal output (ST-Link VCP)
  *   - 115200 baud, 8 data bits, 1 stop bit
- *   - PA9 (TX), PA10 (RX)
+ *   - PA2 (TX), PA15 (RX)
  */
-void MX_USART1_Init(void);
+void MX_USART2_Init(void);
 
 /**
  * @brief Send a string via UART1
@@ -101,20 +101,20 @@ static inline void Output_Set_Low(void)
  * ======================================================================== */
 
 /**
- * @brief Set EN (PA3) HIGH
+ * @brief Set EN (PA6) HIGH
  * WARNING: EN is asserted HIGH only for confirmed activity wake events
  */
 static inline void Enable_Set_High(void)
 {
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
 }
 
 /**
- * @brief Set EN (PA3) LOW
+ * @brief Set EN (PA6) LOW
  */
 static inline void Enable_Set_Low(void)
 {
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
 }
 
 #endif /* SPI_GPIO_CONFIG_H */

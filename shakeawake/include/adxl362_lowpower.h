@@ -13,7 +13,9 @@
 /* ========================================================================
  * ADXL362 Register Addresses (per datasheet)
  * ======================================================================== */
-#define ADXL362_REG_DEVID           0x00  /* Device ID (should be 0xF2) */
+#define ADXL362_REG_DEVID           0x00  /* Device AD ID (should be 0xAD) */
+#define ADXL362_REG_DEVID_MST       0x01  /* MEMS Device ID (should be 0x1D) */
+#define ADXL362_REG_PARTID          0x02  /* Part ID (should be 0xF2) */
 #define ADXL362_REG_THRESH_ACT      0x20  /* Activity threshold (2 bytes) */
 #define ADXL362_REG_THRESH_INACT    0x23  /* Inactivity threshold (2 bytes) */
 #define ADXL362_REG_TIME_INACT      0x25  /* Inactivity time (2 bytes) */

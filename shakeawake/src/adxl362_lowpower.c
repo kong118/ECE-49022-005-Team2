@@ -179,10 +179,11 @@ HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
     /* Wait for reset to complete */
     HAL_Delay(10);
     
-    /* ===== Step 2: Verify Device ID ===== */
-    status = ADXL362_ReadByte(ADXL362_REG_DEVID, &device_id);
+    /* ===== Step 2: Verify Part ID ===== */
+    /* PARTID register (0x02) should return 0xF2 for ADXL362 */
+    status = ADXL362_ReadByte(ADXL362_REG_PARTID, &device_id);
     if (status != HAL_OK || device_id != 0xF2) {
-        return HAL_ERROR;  /* Device ID mismatch */
+        return HAL_ERROR;  /* Part ID mismatch - not an ADXL362 */
     }
     
     /* ===== Step 3: Configure Activity Detection ===== */

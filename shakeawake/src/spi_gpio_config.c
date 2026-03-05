@@ -13,10 +13,10 @@ void Error_Handler(void);
 SPI_HandleTypeDef hspi1;
 
 /* ========================================================================
- * UART1 Handle for terminal output
+ * UART2 Handle for terminal output (ST-Link VCP)
  * ======================================================================== */
 
-UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
 
 /* ========================================================================
  * MX_GPIO_Init - Initialize all GPIO pins
@@ -69,8 +69,8 @@ void MX_GPIO_Init(void)
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     Output_Set_Low();  /* Initialize LOW */
     
-    /* ===== Configure EN (PA3) as GPIO output ===== */
-    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    /* ===== Configure EN (PA6) as GPIO output ===== */
+    GPIO_InitStruct.Pin = GPIO_PIN_6;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
@@ -116,44 +116,53 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef* hspi)
 }
 
 /* ========================================================================
- * MX_USART1_Init - Initialize USART1 for terminal output
- * PA9 = TX, PA10 = RX
+ * MX_USART2_Init - Initialize USART2 for terminal output (ST-Link VCP)
+ * PA2 = TX (AF7), PA15 = RX (AF3)
  * Baud rate: 115200
  * ======================================================================== */
 
-void MX_USART1_Init(void)
+void MX_USART2_Init(void)
 {
     GPIO_InitTypeDef GPIO_InitStruct = {0};
     
-    /* Enable USART1 and GPIO clocks */
-    __HAL_RCC_USART1_CLK_ENABLE();
+    /* Enable USART2 and GPIO clocks */
+    __HAL_RCC_USART2_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     
-    /* Configure PA9 (TX) and PA10 (RX) as USART1 alternate function */
-    GPIO_InitStruct.Pin = GPIO_PIN_9 | GPIO_PIN_10;
+    /* Configure PA2 (TX) as USART2 alternate function AF7 */
+    GPIO_InitStruct.Pin = GPIO_PIN_2;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
+    GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     
-    /* Configure USART1 */
-    huart1.Instance = USART1;
-    huart1.Init.BaudRate = 115200;
-    huart1.Init.WordLength = UART_WORDLENGTH_8B;
-    huart1.Init.StopBits = UART_STOPBITS_1;
-    huart1.Init.Parity = UART_PARITY_NONE;
-    huart1.Init.Mode = UART_MODE_TX_RX;
-    huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-    huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+    /* Configure PA15 (RX) as USART2 alternate function AF3 */
+    GPIO_InitStruct.Pin = GPIO_PIN_15;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF3_USART2;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
     
-    if (HAL_UART_Init(&huart1) != HAL_OK) {
+    /* Configure USART2 */
+    huart2.Instance = USART2;
+    huart2.Init.BaudRate = 115200;
+    huart2.Init.WordLength = UART_WORDLENGTH_8B;
+    huart2.Init.StopBits = UART_STOPBITS_1;
+    huart2.Init.Parity = UART_PARITY_NONE;
+    huart2.Init.Mode = UART_MODE_TX_RX;
+    huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+    huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+    
+    if (HAL_UART_Init(&huart2) != HAL_OK) {
         Error_Handler();
     }
 }
 
 /* ========================================================================
- * UART_SendString - Send a string via UART1
+ * UART_SendString - Send a string via UART2
  * ======================================================================== */
 
 void UART_SendString(const char *str)
@@ -168,12 +177,12 @@ void UART_SendString(const char *str)
     }
     
     if (len > 0) {
-        HAL_UART_Transmit(&huart1, (uint8_t *)str, len, HAL_MAX_DELAY);
+        HAL_UART_Transmit(&huart2, (uint8_t *)str, len, HAL_MAX_DELAY);
     }
 }
 
 /* ========================================================================
- * UART_Printf - Send formatted string via UART1 (like printf)
+ * UART_Printf - Send formatted string via UART2 (like printf)
  * Simplified version using sprintf to avoid vsnprintf issues
  * ======================================================================== */
 
@@ -190,6 +199,6 @@ void UART_Printf(const char *format, ...)
     va_end(args);
     
     if (len > 0 && len < (int)sizeof(buffer)) {
-        HAL_UART_Transmit(&huart1, (uint8_t *)buffer, len, HAL_MAX_DELAY);
+        HAL_UART_Transmit(&huart2, (uint8_t *)buffer, len, HAL_MAX_DELAY);
     }
 }

@@ -52,7 +52,7 @@ extern volatile uint8_t wake_event_flag;
 #define OUTPUT_PIN              GPIO_PIN_7   /* PA7 - A6, Active HIGH */
 
 #define ENABLE_PORT             GPIOA
-#define ENABLE_PIN              GPIO_PIN_3   /* PA3 - A2, Active HIGH */
+#define ENABLE_PIN              GPIO_PIN_6   /* PA3 - A2, Active HIGH */
 
 /* ========================================================================
  * Configuration Functions
