@@ -15,9 +15,6 @@
 #include "adxl362_lowpower.h"
 #include "spi_gpio_config.h"
 
-/* External UART functions for debug output */
-extern void UART_SendString(const char *str);
-
 /* ========================================================================
  * Internal SPI Helper Functions
  * ======================================================================== */
@@ -168,7 +165,6 @@ HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
     /* ===== Step 1: Soft Reset ===== */
     status = ADXL362_WriteByte(ADXL362_REG_SOFT_RESET, 0x52);
     if (status != HAL_OK) {
-        UART_SendString("  SPI write failed!\r\n");
         return HAL_ERROR;
     }
     
@@ -178,10 +174,8 @@ HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
     /* ===== Step 2: Verify Part ID ===== */
     status = ADXL362_ReadByte(ADXL362_REG_PARTID, &device_id);
     if (status != HAL_OK || device_id != 0xF2) {
-        UART_SendString("  Part ID mismatch!\r\n");
         return HAL_ERROR;
     }
-    UART_SendString("  Part ID verified (0xF2)\r\n");
     
     /* ===== All configuration done in STANDBY mode ===== */
     /* Device is in standby after reset, so no need to explicitly set it */
@@ -201,10 +195,8 @@ HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
     /* Verify threshold was written correctly */
     ADXL362_ReadByte(ADXL362_REG_THRESH_ACT, &readback);
     if (readback != thresh_low) {
-        UART_SendString("  Threshold write verify failed!\r\n");
         return HAL_ERROR;
     }
-    UART_SendString("  Threshold set OK\r\n");
     
     /* ===== Step 4: Set Activity Time (1 sample) ===== */
     status = ADXL362_WriteByte(ADXL362_REG_TIME_ACT, 1);
@@ -215,7 +207,6 @@ HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
     status = ADXL362_WriteByte(ADXL362_REG_ACT_INACT_CTL, 
                                ADXL362_ACT_ENABLE | ADXL362_ACT_REF);
     if (status != HAL_OK) return HAL_ERROR;
-    UART_SendString("  Activity detect configured\r\n");
     
     /* ===== Step 6: Map ACTIVITY interrupt to BOTH INT1 and INT2 pins ===== */
     /* Map to both in case user wired INT1 instead of INT2 */
@@ -223,7 +214,6 @@ HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
     if (status != HAL_OK) return HAL_ERROR;
     status = ADXL362_WriteByte(ADXL362_REG_INTMAP2, ADXL362_INT_ACT);
     if (status != HAL_OK) return HAL_ERROR;
-    UART_SendString("  INT1+INT2 mapped to ACTIVITY\r\n");
     
     /* ===== Step 7: Enter Wake-Up Mode ===== */
     /* POWER_CTL: bit 3 = WAKEUP, bit 1 = MEASURE = 0x0A */
@@ -235,7 +225,6 @@ HAL_StatusTypeDef ADXL362_Init(uint16_t threshold_mg)
     
     /* Read and display STATUS to clear any pending interrupts */
     ADXL362_ReadByte(ADXL362_REG_STATUS, &readback);
-    UART_SendString("  Wake-up mode active\r\n");
     
     return HAL_OK;
 }
