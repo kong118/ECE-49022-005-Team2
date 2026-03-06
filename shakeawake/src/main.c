@@ -138,6 +138,11 @@ int main(void)
     MX_GPIO_Init();
     MX_SPI1_Init();
     
+    /* ===== CRITICAL: Disable debug in STOP/Standby modes ===== */
+    /* ST-Link DBGMCU keeps all clocks running in STOP2 by default,
+     * preventing the MCU from truly entering low-power (~3mA vs ~1uA) */
+    DBGMCU->CR &= ~(DBGMCU_CR_DBG_STOP | DBGMCU_CR_DBG_STANDBY | DBGMCU_CR_DBG_SLEEP);
+    
     /* Small delay for peripherals to stabilize */
     HAL_Delay(100);
     
@@ -168,8 +173,11 @@ int main(void)
     while (1)
     {
         /* ---- Prepare for STOP2 ---- */
-        /* Disable SPI1 clock to save power (re-enable after wake) */
+        /* Disable peripheral clocks (EXTI works without GPIO clock) */
         __HAL_RCC_SPI1_CLK_DISABLE();
+        __HAL_RCC_GPIOA_CLK_DISABLE();
+        __HAL_RCC_GPIOB_CLK_DISABLE();
+        __HAL_RCC_SYSCFG_CLK_DISABLE();
         
         /* Suspend SysTick to avoid waking up every 1ms */
         HAL_SuspendTick();
@@ -187,7 +195,10 @@ int main(void)
         /* Resume SysTick */
         HAL_ResumeTick();
         
-        /* Re-enable SPI1 clock */
+        /* Re-enable peripheral clocks */
+        __HAL_RCC_SYSCFG_CLK_ENABLE();
+        __HAL_RCC_GPIOA_CLK_ENABLE();
+        __HAL_RCC_GPIOB_CLK_ENABLE();
         __HAL_RCC_SPI1_CLK_ENABLE();
         
         /* Check if we woke from ADXL362 INT1 */
