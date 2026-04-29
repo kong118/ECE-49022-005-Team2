@@ -1,24 +1,32 @@
 /* ========================================================================
- * ShakeAwake Application - STM32L432KC with ADXL362
+ * Shake-Awake Application - STM32L432KC with ADXL362
  * 
  * Functionality:
  *   - Monitors ADXL362 accelerometer for activity (shake) events
- *   - INT2 rising edge triggers OUTPUT (PA7) and EN (PA3) HIGH for 500ms
- *   - After 500ms, both pins are driven LOW
- *   - Wake threshold is configurable via ADXL362_SetWakeThreshold_mg()
+ *   - INT2 rising edge triggers Verdin wake pulse through PA6 -> Q1
+ *   - After VERDIN_WAKE_PULSE_MS (500ms default), PA6 returns LOW
+ *   - Lockout prevents repeated pulses within SHAKE_AWAKE_LOCKOUT_MS (2000ms)
  * 
- * pin assignments:
+ * Hardware connections:
  *   - SPI1: PB3 (SCLK), PB5 (MOSI), PB4 (MISO)
  *   - ADXL362 CS: PB0 (GPIO output, active LOW)
- *   - ADXL362 INT1: PB1 / D6 (EXTI interrupt, rising edge)
- *   - OUTPUT: PA7 (GPIO output, active HIGH)
- *   - EN: PA6 (GPIO output, active HIGH)
+ *   - ADXL362 INT2: PB6 (EXTI interrupt, rising edge)
+ *   - Verdin wake: PA6 -> Q1 2N7002 -> Verdin control line
+ * 
+ * Verdin Control Pin Warning:
+ *   - Verdin control pins are 1.8V domain!
+ *   - The Q1 2N7002 transistor provides level-shifting from 3.3V STM32
+ *   - to 1.8V Verdin input. PA6 HIGH turns Q1 on, pulling the Verdin
+ *   - control line LOW (active-low signal).
+ *   - Keep pulse below 5 seconds to avoid Verdin force-off behavior
+ *   - on CTRL_PWR_BTN_MICO#.
  * ======================================================================== */
 
 #include "stm32l4xx_hal.h"
 #include "config.h"
 #include "spi_gpio_config.h"
 #include "adxl362_lowpower.h"
+#include "shake_awake.h"
 
 /* ========================================================================
  * Forward Declarations
@@ -109,10 +117,8 @@ void SysTick_Handler(void)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    if (GPIO_Pin == GPIO_PIN_1) {  /* PB1 (D6) is INT1 */
-        /* Set flag to process wake event in main loop */
-        wake_event_flag = 1;
-    }
+    /* Delegate to shake_awake module */
+    shake_awake_on_exti(GPIO_Pin);
 }
 
 /* ========================================================================
@@ -121,8 +127,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 int main(void)
 {
-    uint8_t status_reg = 0;
-    
     /* ===== Initialization Phase ===== */
     
     /* Initialize HAL library (sets up SysTick, calls HAL_MspInit) */
@@ -146,32 +150,22 @@ int main(void)
     /* Small delay for peripherals to stabilize */
     HAL_Delay(100);
     
-    /* Initialize ADXL362 in wake-up mode with default activity threshold */
-    if (ADXL362_Init(DEFAULT_ACTIVITY_THRESHOLD_MG) != HAL_OK) {
-        /* Init failed - stay in error loop */
-        while (1) { HAL_Delay(1000); }
-    }
+    /* ===== Initialize Shake-Awake Module ===== */
+    /* This configures:
+     *   - PA6 as Verdin wake output (defaults LOW immediately)
+     *   - PB6 as EXTI input for ADXL362 INT2
+     *   - ADXL362 for activity detection with interrupt on INT2
+     */
+    shake_awake_init();
     
-    /* ===== Clear stale ACT from boot ===== */
-    ADXL362_WriteByte(0x2D, 0x00);  /* standby */
-    HAL_Delay(10);
-    ADXL362_ReadStatus(&status_reg); /* clear STATUS */
-    ADXL362_WriteByte(0x2D, 0x0A);  /* wake-up mode */
-    HAL_Delay(200);                  /* let reference sample settle */
-    ADXL362_ReadStatus(&status_reg); /* clear any boot-up ACT */
-    
-    /* Clear any pending EXTI on PB1 */
-    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_1);
-    wake_event_flag = 0;
-    
-    /* Enable EXTI1 interrupt for INT1 (PB1 = D6) */
-    HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+    /* Arm the shake-awake system */
+    shake_awake_arm();
     
     /* ===== Main Loop: STOP2 Low-Power with EXTI Wake ===== */
     
     while (1)
     {
+#if ENABLE_LOW_POWER_AFTER_SHAKE_AWAKE
         /* ---- Prepare for STOP2 ---- */
         /* Disable peripheral clocks (EXTI works without GPIO clock) */
         __HAL_RCC_SPI1_CLK_DISABLE();
@@ -200,59 +194,16 @@ int main(void)
         __HAL_RCC_GPIOA_CLK_ENABLE();
         __HAL_RCC_GPIOB_CLK_ENABLE();
         __HAL_RCC_SPI1_CLK_ENABLE();
+#endif
+        /* ---- Process shake-awake events ---- */
+        shake_awake_task();
         
-        /* Check if we woke from ADXL362 INT1 */
-        if (wake_event_flag == 1) {
-            wake_event_flag = 0;
-            
-            /* Read STATUS to confirm activity */
-            if (ADXL362_ReadStatus(&status_reg) == HAL_OK) {
-                if ((status_reg & ADXL362_STATUS_ACT) != 0) {
-                    
-                    /* Step 1: OUT HIGH */
-                    Output_Set_High();
-                    HAL_Delay(50);
-                    
-                    /* Step 2: EN HIGH (OUT stays HIGH) */
-                    Enable_Set_High();
-                    HAL_Delay(100);
-                    
-                    /* Step 3: Both LOW */
-                    Enable_Set_Low();
-                    Output_Set_Low();
-                }
-            }
-            
-            /* Reset ADXL362 state machine */
-            ADXL362_ReadStatus(&status_reg);  /* clear ACT */
-            ADXL362_WriteByte(0x2D, 0x00);    /* standby */
-            HAL_Delay(10);
-            ADXL362_WriteByte(0x2D, 0x0A);    /* wake-up mode */
-            HAL_Delay(100);                    /* reference settle */
-            ADXL362_ReadStatus(&status_reg);  /* clear boot ACT */
-            
-            /* Clear EXTI and debounce */
-            __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_1);
-            wake_event_flag = 0;
-            HAL_Delay(500);
-            ADXL362_ReadStatus(&status_reg);
-        }
-        
+#if ENABLE_LOW_POWER_AFTER_SHAKE_AWAKE
         /* Clear any pending EXTI before re-entering STOP2 */
-        __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_1);
-        wake_event_flag = 0;
+        __HAL_GPIO_EXTI_CLEAR_IT(ADXL362_INT2_Pin);
+#endif
     }
     
     return 0;
-}
-
-/* ========================================================================
- * EXTI9_5 Interrupt Handler
- * This handles external interrupts on pins 5-9 (including PB6 = INT2)
- * ======================================================================== */
-
-void EXTI1_IRQHandler(void)
-{
-    HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_1);
 }
 
